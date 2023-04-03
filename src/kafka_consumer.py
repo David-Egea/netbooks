@@ -1,33 +1,37 @@
-from kafka import KafkaConsumer
+from kafka import KafkaConsumer, errors
 import nbformat
 from datetime import datetime
 import json
 from typing import List, Dict
 import threading
 import os
-import pathlib
+from pathlib import Path
 from src.color import COLOR, cprint, cstr
 
-BACKUP_PATH = os.path.join(str(pathlib.Path(__file__).parent.resolve().parent.resolve()),"backups","backup.json")
+BACKUP_PATH = os.path.join(str(Path(__file__).parent.resolve().parent.resolve()),"backups","backup.json")
 
 class Consumer():
     """ Netbooks consumer class. Params
-        * bootstrap_servers: Kafka Server IP+PORT to connect
+        * bootstrap_servers: Kafka Server `IP:PORT` to connect
         * topics: List of topics to subscribe
         * target_nb: Jupyter notebook to updated with input messages
     """
 
     def __init__(self, bootstrap_servers: List[str], topics: List[str], target_nb: str) -> None:
-        # Creates Kafka Consumer
-        self._consumer = KafkaConsumer(bootstrap_servers=bootstrap_servers, value_deserializer=lambda m: json.loads(m.decode('utf-8')))
-        cprint(f"New consumer created:",COLOR.BOLD)
-        [cprint(f" * Bootstrap server {i}: {server}",COLOR.OKBLUE) for i, server in enumerate(bootstrap_servers.split(","))]
-        # Subscribes to topics
-        self.topics = topics
-        self.subscribe(topics)
-        # Target Notebook
-        self.target_nb = target_nb
-        self.messages = self.load_backup()
+        try:
+            # Creates Kafka Consumer
+            self._consumer = KafkaConsumer(bootstrap_servers=bootstrap_servers, value_deserializer=lambda m: json.loads(m.decode('utf-8')))
+            cprint(f"New consumer created:",COLOR.BOLD)
+            [cprint(f" * Bootstrap server {i}: {server}",COLOR.OKBLUE) for i, server in enumerate(bootstrap_servers.split(","))]
+            # Subscribes to topics
+            self.topics = topics
+            self.subscribe(topics)
+            # Parses target notebook path to OS (Linux|Windows))
+            self.target_nb = Path(target_nb).resolve()
+            self.messages = self.load_backup()
+        except errors.NoBrokersAvailable:
+            cprint(f"[ERROR] Can't connect to bootstrap servers {bootstrap_servers}",COLOR.FAIL)
+            cprint(f"[ERROR] Please check if Kafka is running and IP address is correct.",COLOR.FAIL)
 
     def subscribe(self, topics: List[str]) -> None:
         """ Subscribes consumer to indicated topics.
@@ -51,52 +55,65 @@ class Consumer():
                     if len(self.messages.keys()):
                         print(f"[A1.] Messages received from topics: ")
                         [print(f" - {cstr(t,COLOR.OKCYAN)}") for t in self.messages.keys()]
+                    else:
+                        cprint(f"[A1.] No messages received to any topic.",COLOR.WARNING)
                     # Requests topic
                     topic = input(f"[A1.] Enter topic: \n")
-                    try:
-                        # Gets that topic producers
-                        producers = self.messages[topic]
-                        # Show that topic producers
-                        if len(producers):
-                            print(f"[A2.] Messages received to {cstr(topic,COLOR.OKCYAN)} from producers: ")
-                            [print(f" - {cstr(p,COLOR.OKBLUE)}") for p in producers]
-                        # Requests producer
-                        producer = input(f"[A2.] Enter producer: \n")
-                        if producer in producers:
-                            # Gets message from producer and topic
-                            message = self.messages[topic][producer]
-                            answer = input(f"[A3.] Is the target notebook path {cstr(self.target_nb,COLOR.WARNING)} ([Y]/n)?: ").lower()
-                            if answer == '' or answer == "y":
-                                # Synchronizes the target notebook
-                                self.sync_nb(message,self.target_nb)
-                            elif answer == 'n':
-                                # New  target notebook path
-                                target_nb = input(f"[A3.1] Enter the target notebook path: ")
-                                self.sync_nb(message,target_nb)
-                        else:
-                            cprint(f"[Error] No message from {producer} to {topic}",COLOR.FAIL)
-                    except KeyError:
-                        cprint(f"[Error] No messages from topic {topic}",COLOR.FAIL)
+                    if topic.lower() != "exit": 
+                        try:
+                            # Gets that topic producers
+                            producers = self.messages[topic]
+                            # Show that topic producers
+                            if len(producers):
+                                print(f"[A2.] Messages received to {cstr(topic,COLOR.OKCYAN)} from producers: ")
+                                [print(f" - {cstr(p,COLOR.OKBLUE)}") for p in producers]
+                            else:
+                                cprint(f"[A1.] No messages received from any producer to this topic.",COLOR.WARNING)
+                            # Requests producer
+                            producer = input(f"[A2.] Enter producer: \n")
+                            if producer.lower() != "exit":
+                                if producer in producers:
+                                    # Gets message from producer and topic
+                                    message = self.messages[topic][producer]
+                                    answer = input(f"[A3.] Is the target notebook path {cstr(self.target_nb,COLOR.WARNING)} ([Y]/n)?: ").lower()
+                                    if answer.lower() != "exit": 
+                                        if answer == '' or answer == "y":
+                                            # Synchronizes the target notebook
+                                            self.sync_nb(message,self.target_nb)
+                                        elif answer == 'n':
+                                            # New  target notebook path
+                                            target_nb = input(f"[A3.1] Enter the target notebook path: ")
+                                            self.sync_nb(message,target_nb)
+                                else:
+                                    cprint(f"[Error] No message from {producer} to {topic}",COLOR.FAIL)
+                        except KeyError:
+                            cprint(f"[Error] No messages from topic {topic}",COLOR.FAIL)
                 elif answer == "b":
                     topic = input(f"[B.1] Enter new topic: \n")
-                    if topic not in self.topics:
-                        # Subscribes to the new topic
-                        self._consumer.subscribe(topic)
-                        self.topics.append(topic)
-                        print(f"[B] {cstr('Successfully',COLOR.BOLD)} subscribed to topic {cstr(topic,COLOR.OKCYAN)}")
-                    else:
-                        print(f"[B] {cstr('Already',COLOR.BOLD)} subscribed to topic {cstr(topic,COLOR.OKCYAN)}")
+                    if topic.lower() != "exit":
+                        if topic not in self.topics:
+                            # Subscribes to the new topic
+                            self._consumer.subscribe(topic)
+                            self.topics.append(topic)
+                            print(f"[B] {cstr('Successfully',COLOR.BOLD)} subscribed to topic {cstr(topic,COLOR.OKCYAN)}")
+                        else:
+                            print(f"[B] {cstr('Already',COLOR.BOLD)} subscribed to topic {cstr(topic,COLOR.OKCYAN)}")
 
         except EOFError:
             self.__del__()      
 
     def run(self) -> None:
         """ Awaits for input messages produced to the consumer's interest topics. """
-        self._threads = [threading.Thread(target=self._run)]
-        self._threads.append(threading.Thread(target=self._request_input))
-        [thread.start() for thread in self._threads]
+        try:
+            assert self._consumer
+            self._threads = [threading.Thread(target=self._run)]
+            self._threads.append(threading.Thread(target=self._request_input))
+            [thread.start() for thread in self._threads]
+        except AttributeError:
+            pass
         
     def _run(self) -> None:
+        self._consumer.poll(timeout_ms=2000)
         # Awaits for messages
         for msg in self._consumer:
             # Message datetime
@@ -116,7 +133,10 @@ class Consumer():
             self.update_backup()
 
     def __del__(self):
-        [thread.interrupt_main() for thread in self._threads]
+        try:
+            [thread.interrupt_main() for thread in self._threads]
+        except AttributeError:
+            pass
 
     def sync_nb(self, message: str, target_nb: str) -> None:
         # Code cells
