@@ -37,6 +37,7 @@ class Consumer():
         """ Subscribes consumer to indicated topics.
             * topics: list of topics to subscribe
         """
+        topics.insert(0,"main") # Add main topic
         self._consumer.subscribe(topics)
         [cprint(f" * Subscribed to topic: {t}",COLOR.OKCYAN) for t in topics]
 
@@ -79,11 +80,11 @@ class Consumer():
                                     if answer.lower() != "exit": 
                                         if answer == '' or answer == "y":
                                             # Synchronizes the target notebook
-                                            self.sync_nb(message,self.target_nb)
+                                            self.sync_nb(message,self.target_nb,producer,topic)
                                         elif answer == 'n':
                                             # New  target notebook path
                                             target_nb = input(f"[A3.1] Enter the target notebook path: ")
-                                            self.sync_nb(message,target_nb)
+                                            self.sync_nb(message,target_nb,producer,topic)
                                 else:
                                     cprint(f"[Error] No message from {producer} to {topic}",COLOR.FAIL)
                         except KeyError:
@@ -117,7 +118,7 @@ class Consumer():
         # Awaits for messages
         for msg in self._consumer:
             # Message datetime
-            msg_time = datetime.fromtimestamp(int(msg.timestamp/100)).strftime('%H:%M:%S')
+            msg_time = datetime.fromtimestamp(int(msg.timestamp/1000)).strftime('%H:%M:%S')
             # Message info
             topic = msg.topic # Message topic
             producer = msg.value['producer'] # Message producer
@@ -138,7 +139,13 @@ class Consumer():
         except AttributeError:
             pass
 
-    def sync_nb(self, message: str, target_nb: str) -> None:
+    def sync_nb(self, message: str, target_nb: str, producer: str = None, topic: str = None) -> None:
+        """ Synchronizes the target notebook with the input kafka message. Params:
+            * message: Input kafka message
+            * target_nb: Target notebook
+            * producer: Message producer
+            * topic: Topic of the message
+        """
         # Code cells
         cells = message
         # Converts dict to list in case is a one cell message
@@ -149,14 +156,15 @@ class Consumer():
             with open(target_nb, 'r') as f:
                 nb = nbformat.read(f, as_version=4)
             # Split markdown cell
-            nb['cells'].append(nbformat.v4.new_markdown_cell("---"))
+            split_message = f"---\n{topic} from {producer} at {datetime.now().strftime('%H:%M:%S')}" if producer is not None and topic is not None else "---"
+            nb['cells'].append(nbformat.v4.new_markdown_cell(split_message))
             # Appends the new cells to the notebook
             for c in cells:
                 if c['cell_type'] == 'code':
                     new_cell = nbformat.v4.new_code_cell(c["source"])
                 elif c['cell_type'] == 'markdown':
                     new_cell = nbformat.v4.new_markdown_cell(c["source"])
-                # Inserta la nueva celda de código en la posición deseada en la lista de celdas
+                # Inserts new cell at indicated position
                 nb['cells'].append(new_cell)
             # Saves updated notebook
             with open(target_nb, 'w') as f:
@@ -168,9 +176,14 @@ class Consumer():
     
     def load_backup(self) -> Dict[str, Dict[str, List[str]]]:
         """ Reads and returns the backup of messages."""
-        #Retrieves backup data messages
-        with open(BACKUP_PATH,'r+') as f:
-            backup_data = json.load(f)
+        # Retrieves backup data messages
+        try:
+            with open(BACKUP_PATH,'r+') as f:
+                backup_data = json.load(f)
+        except FileNotFoundError:
+            with open(BACKUP_PATH,"w+") as f:
+                backup_data = {}
+                json.dump(backup_data, f)
         return backup_data
 
     def update_backup(self) -> None:
