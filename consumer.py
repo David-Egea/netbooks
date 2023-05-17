@@ -1,9 +1,9 @@
 from src.kafka_consumer import Consumer
 
 myconsumer = Consumer(
-    bootstrap_servers = 'localhost:9092',
+    bootstrap_servers = '34.175.78.32:9092',
     topics = ["ejercicio-1", "ejercicio-2"], 
-    target_nb = "C:\\Users\\egeah\\netbooks\\notebookB.ipynb"
+    target_nb = "notebookB.ipynb"
 )
 
 myconsumer.run()
